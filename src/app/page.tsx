@@ -22,9 +22,38 @@ const BRAND_SEEDS: { q: string; matchers: RegExp[] }[] = [
   { q: "adidas", matchers: [/^adidas$/i] },
   { q: "New Balance", matchers: [/^new balance$/i, /^nb$/i] },
   { q: "ASICS", matchers: [/^asics$/i] },
-  { q: "POP MART", matchers: [/^pop ?mart$/i] },
+  { q: "Yeezy", matchers: [/^yeezy$/i] },
+  { q: "Puma", matchers: [/^puma$/i] },
+  { q: "Reebok", matchers: [/^reebok$/i] },
+  { q: "Converse", matchers: [/^converse$/i] },
+  { q: "Vans", matchers: [/^vans$/i] },
+  { q: "Salomon", matchers: [/^salomon$/i] },
+  { q: "Hoka", matchers: [/^hoka( one one)?$/i] },
+  { q: "On Running", matchers: [/^on( running)?$/i] },
+  { q: "UGG", matchers: [/^ugg$/i] },
+  { q: "Crocs", matchers: [/^crocs/i] },
+  { q: "Birkenstock", matchers: [/^birkenstock$/i] },
+  { q: "Timberland", matchers: [/^timberland$/i] },
+
+
+  // Streetwear / collectibles
+  { q: "Supreme", matchers: [/^supreme$/i] },
   { q: "Essentials", matchers: [/^essentials$/i, /fear of god/i] },
   { q: "Fear of God Essentials", matchers: [/fear of god/i, /essentials/i] },
+  { q: "Palace", matchers: [/^palace$/i] },
+  { q: "BAPE", matchers: [/^bape$/i, /a bathing ape/i] },
+  { q: "Kith", matchers: [/^kith$/i] },
+  { q: "Stussy", matchers: [/^st[üu]ssy$/i, /^stussy$/i] },
+
+  { q: "POP MART", matchers: [/^pop ?mart$/i] },
+  { q: "BEARBRICK", matchers: [/^be@?rbrick$/i, /^medicom( toy)?$/i] },
+  { q: "LEGO", matchers: [/^lego$/i] },
+  { q: "Funko", matchers: [/^funko$/i] },
+  { q: "KAWS", matchers: [/^kaws$/i] },
+  { q: "Hot Wheels", matchers: [/^hot wheels$/i] },
+  { q: "Pokémon", matchers: [/^pok[eé]mon/i] },
+  { q: "Panini", matchers: [/^panini$/i] },
+  { q: "Topps", matchers: [/^topps$/i] },
 ];
 
 function brandMatches(seed: { matchers: RegExp[] }, brand?: string) {
@@ -44,7 +73,7 @@ async function fetchBrandBatch(q: string, limit = 10): Promise<Sneaker[]> {
 
 /** ---------- Merge once; sort by rank ---------- */
 async function getMergedRanked(): Promise<Sneaker[]> {
-  const batches = await Promise.all(BRAND_SEEDS.map((s) => fetchBrandBatch(s.q, 10)));
+  const batches = await Promise.all(BRAND_SEEDS.map((s) => fetchBrandBatch(s.q, 30)));
 
   const seen = new Set<string>();
   const merged: Sneaker[] = [];
@@ -157,6 +186,8 @@ export default async function Page() {
   const topSneakers = top10FromMerged(merged, (p) => kindOf(p) === "sneakers");
   const topStreetwear = top10FromMerged(merged, (p) => kindOf(p) === "streetwear");
   const topCollectibles = top10FromMerged(merged, (p) => kindOf(p) === "collectibles");
+  const contigAll = contiguousFromOne(merged);               // #1 → until the first gap
+  const lastRank = contigAll.at(-1)?.rank as number | undefined;
 
   return (
     <section className="space-y-8">
@@ -241,6 +272,32 @@ export default async function Page() {
           Built from multiple brand searches (10 per brand). Lists show ranks from #1 upward until a gap; if fewer than 10
           contiguous ranks are found, they fall back to the best by rank.
         </p>
+
+        {/* Temporary: full contiguous list from #1 (to find the next missing rank) */}
+        {/* <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
+          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
+            Contiguous ranks from #1 — Temporary (debug)
+          </summary>
+          <div className="px-3 pb-3 text-sm text-white/60">
+            {contigAll.length ? (
+              <>
+                Found <span className="text-white/80 font-medium">{contigAll.length}</span> contiguous ranks
+                {lastRank ? <> (#{1}–#{lastRank})</> : null}.{" "}
+                {lastRank ? <>Next missing appears to be <span className="text-white/80 font-medium">#{lastRank + 1}</span>.</> : null}
+                <br />
+                Tip: search more brands on localhost and add any that surface the missing rank to <code>BRAND_SEEDS</code>.
+              </>
+            ) : (
+              <>No contiguous ranks found yet.</>
+            )}
+          </div>
+          <ul className="divide-y divide-neutral-800">
+            {contigAll.length
+              ? contigAll.map((p) => <Row key={uniqKey(p)} p={p} />)
+              : <li className="p-4 text-sm text-white/60">Nothing to show.</li>}
+          </ul>
+        </details> */}
+
       </div>
     </section>
   );
