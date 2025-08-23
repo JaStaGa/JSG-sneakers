@@ -15,7 +15,7 @@ async function absoluteUrl(path: string) {
   return `${proto}://${host}${path}`;
 }
 
-// Brand seeds: more breadth, 10 per brand
+/** ---------- Brand seeds (breadth) ---------- */
 const BRAND_SEEDS: { q: string; matchers: RegExp[] }[] = [
   { q: "Jordan", matchers: [/^jordan$/i, /^air jordan/i] },
   { q: "Nike", matchers: [/^nike$/i] },
@@ -31,10 +31,7 @@ function brandMatches(seed: { matchers: RegExp[] }, brand?: string) {
   const b = (brand ?? "").trim();
   return b && seed.matchers.some((rx) => rx.test(b));
 }
-
-function uniqKey(p: Sneaker) {
-  return String(p.slug ?? p.sku ?? p.id ?? "").toLowerCase();
-}
+const uniqKey = (p: Sneaker) => String(p.slug ?? p.sku ?? p.id ?? "").toLowerCase();
 
 async function fetchBrandBatch(q: string, limit = 10): Promise<Sneaker[]> {
   const params = new URLSearchParams({ q, limit: String(limit) });
@@ -45,26 +42,9 @@ async function fetchBrandBatch(q: string, limit = 10): Promise<Sneaker[]> {
   return (Array.isArray(json) ? json : json.data ?? []) as Sneaker[];
 }
 
-function buildContiguousFromOne(items: Sneaker[]) {
-  const byRank = new Map<number, Sneaker>();
-  for (const p of items) {
-    const r = typeof p.rank === "number" ? p.rank : undefined;
-    if (!r || r <= 0) continue;
-    if (!byRank.has(r)) byRank.set(r, p);
-  }
-  const out: Sneaker[] = [];
-  for (let want = 1; want <= 1000; want++) {
-    const hit = byRank.get(want);
-    if (!hit) break;
-    out.push(hit);
-  }
-  return out;
-}
-
-async function getApproxTopContiguous(): Promise<Sneaker[]> {
-  const batches = await Promise.all(
-    BRAND_SEEDS.map((seed) => fetchBrandBatch(seed.q, 10))
-  );
+/** ---------- Merge once; sort by rank ---------- */
+async function getMergedRanked(): Promise<Sneaker[]> {
+  const batches = await Promise.all(BRAND_SEEDS.map((s) => fetchBrandBatch(s.q, 10)));
 
   const seen = new Set<string>();
   const merged: Sneaker[] = [];
@@ -85,31 +65,98 @@ async function getApproxTopContiguous(): Promise<Sneaker[]> {
       (a.rank ?? Number.POSITIVE_INFINITY) -
       (b.rank ?? Number.POSITIVE_INFINITY)
   );
-
-  const contiguous = buildContiguousFromOne(merged);
-  if (contiguous.length >= 10) return contiguous;
-  return merged.slice(0, 10);
+  return merged;
 }
 
-// --- blurb helpers: use full description when available, trim to length ---
+/** ---------- Kind detection (loose heuristics) ---------- */
+function kindOf(p: Sneaker): "sneakers" | "streetwear" | "collectibles" | "other" {
+  const hay = `${p.product_type ?? ""} ${p.category ?? ""} ${p.secondary_category ?? ""} ${p.brand ?? ""}`.toLowerCase();
+
+  if (/(sneaker|shoe|footwear)/.test(hay)) return "sneakers";
+  if (/(streetwear|hoodie|t-?shirt|tee|sweatshirt|jacket|pants|shorts)/.test(hay) || /essentials/.test(hay))
+    return "streetwear";
+  if (/(collectible|figure|vinyl|toy|bearbrick|be@?rbrick|trading|card)/.test(hay) || /pop ?mart/.test(hay))
+    return "collectibles";
+  return "other";
+}
+
+/** ---------- “Contiguous from #1” helper ---------- */
+function contiguousFromOne(items: Sneaker[]) {
+  const byRank = new Map<number, Sneaker>();
+  for (const p of items) {
+    const r = typeof p.rank === "number" ? p.rank : undefined;
+    if (!r || r <= 0) continue;
+    if (!byRank.has(r)) byRank.set(r, p);
+  }
+  const out: Sneaker[] = [];
+  for (let want = 1; want <= 1000; want++) {
+    const hit = byRank.get(want);
+    if (!hit) break;
+    out.push(hit);
+  }
+  return out;
+}
+
+/** Build a Top 10 list from a merged set, optionally filtering by kind */
+function top10FromMerged(merged: Sneaker[], filter?: (p: Sneaker) => boolean) {
+  const pool = filter ? merged.filter(filter) : merged;
+  const contig = contiguousFromOne(pool);
+  const base = (contig.length >= 10 ? contig : pool).slice(0, 10);
+  return base;
+}
+
+/** ---------- Blurb helpers (use full description, trimmed) ---------- */
 const MAX_BLURB = 160;
-function stripHtml(html: string) {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
+const stripHtml = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 function ellipsize(s: string, n = MAX_BLURB) {
   if (s.length <= n) return s;
   const cut = s.slice(0, n);
   const end = cut.lastIndexOf(" ");
   return (end > 60 ? cut.slice(0, end) : cut).trim() + "…";
 }
-function blurbFor(p: Sneaker) {
-  const raw = p.description ?? p.short_description ?? "";
-  const plain = stripHtml(raw);
-  return ellipsize(plain, MAX_BLURB);
+const blurbFor = (p: Sneaker) => ellipsize(stripHtml(p.description ?? p.short_description ?? ""));
+
+/** ---------- List row ---------- */
+function Row({ p }: { p: Sneaker }) {
+  const href = `/sneaker/${encodeURIComponent(p.slug ?? p.sku ?? p.id)}`;
+  const title = p.title ?? p.name ?? "Untitled";
+  const priceBits: string[] = [];
+  if (p.avg_price !== undefined) priceBits.push(`avg $${Math.round(p.avg_price)}`);
+  if (p.max_price !== undefined) priceBits.push(`max $${Math.round(p.max_price)}`);
+  const meta = [p.gender, ...priceBits].filter(Boolean).join(" · ");
+
+  return (
+    <li key={p.id ?? href}>
+      <Link href={href} className="flex items-center gap-3 p-3 hover:bg-neutral-800/60">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xs text-white/50">#{p.rank ?? "—"}</span>
+            <h3 className="truncate">{title}</h3>
+          </div>
+          {(p.description || p.short_description || meta) && (
+            <p className="text-sm text-white/60">
+              {blurbFor(p)}
+              {meta ? ` · ${meta}` : ""}
+            </p>
+          )}
+        </div>
+        {p.image && (
+          <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-neutral-800">
+            <Image src={p.image} alt={title} fill className="object-cover" sizes="64px" />
+          </div>
+        )}
+      </Link>
+    </li>
+  );
 }
 
+/** ---------- Page ---------- */
 export default async function Page() {
-  const top = await getApproxTopContiguous();
+  const merged = await getMergedRanked();
+  const topAll = top10FromMerged(merged);
+  const topSneakers = top10FromMerged(merged, (p) => kindOf(p) === "sneakers");
+  const topStreetwear = top10FromMerged(merged, (p) => kindOf(p) === "streetwear");
+  const topCollectibles = top10FromMerged(merged, (p) => kindOf(p) === "collectibles");
 
   return (
     <section className="space-y-8">
@@ -133,73 +180,66 @@ export default async function Page() {
         </Link>
       </div>
 
-      {/* Top ranked across popular brands (approx) */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-medium text-yellow-400">
-          Top ranked across popular brands (approx)
-        </h2>
+      {/* What is "ranking"? */}
+      <p className="text-sm text-white/60">
+        <span className="font-medium text-white/70">Ranking</span> is a marketplace popularity score (lower is more popular),
+        derived from recent demand signals such as sales velocity, active bids/asks, and views.
+        It updates frequently and the lists below are an approximation built from multiple brand searches.
+      </p>
 
-        <ul className="divide-y divide-neutral-800 rounded-2xl border border-neutral-800 bg-neutral-900">
-          {top.length === 0 && (
-            <li className="p-4 text-sm text-white/60">No items available.</li>
-          )}
+      {/* Top 10 dropdowns */}
+      <div className="space-y-4">
+        {/* All items */}
+        <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
+          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
+            Top 10 — All items
+          </summary>
+          <ul className="divide-y divide-neutral-800">
+            {topAll.length ? topAll.map((p) => <Row key={uniqKey(p)} p={p} />) : (
+              <li className="p-4 text-sm text-white/60">No items available.</li>
+            )}
+          </ul>
+        </details>
 
-          {top.map((p) => {
-            const href = `/sneaker/${encodeURIComponent(
-              p.slug ?? p.sku ?? p.id
-            )}`;
-            const title = p.title ?? p.name ?? "Untitled";
-            const blurb = blurbFor(p);
-            const priceBits: string[] = [];
-            if (p.avg_price !== undefined)
-              priceBits.push(`avg $${Math.round(p.avg_price)}`);
-            if (p.max_price !== undefined)
-              priceBits.push(`max $${Math.round(p.max_price)}`);
-            const meta = [p.gender, ...priceBits].filter(Boolean).join(" · ");
+        {/* Sneakers only */}
+        <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
+          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
+            Top 10 — Sneakers
+          </summary>
+          <ul className="divide-y divide-neutral-800">
+            {topSneakers.length ? topSneakers.map((p) => <Row key={uniqKey(p)} p={p} />) : (
+              <li className="p-4 text-sm text-white/60">No sneakers available.</li>
+            )}
+          </ul>
+        </details>
 
-            return (
-              <li key={p.id ?? href}>
-                <Link
-                  href={href}
-                  className="flex items-center gap-3 p-3 hover:bg-neutral-800/60"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-xs text-white/50">
-                        #{p.rank ?? "—"}
-                      </span>
-                      <h3 className="truncate">{title}</h3>
-                    </div>
-                    {(blurb || meta) && (
-                      <p className="text-sm text-white/60">
-                        {blurb}
-                        {blurb && meta ? " · " : ""}
-                        {meta}
-                      </p>
-                    )}
-                  </div>
+        {/* Streetwear */}
+        <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
+          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
+            Top 10 — Streetwear
+          </summary>
+          <ul className="divide-y divide-neutral-800">
+            {topStreetwear.length ? topStreetwear.map((p) => <Row key={uniqKey(p)} p={p} />) : (
+              <li className="p-4 text-sm text-white/60">No streetwear available.</li>
+            )}
+          </ul>
+        </details>
 
-                  {p.image && (
-                    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-neutral-800">
-                      <Image
-                        src={p.image}
-                        alt={title}
-                        fill
-                        className="object-cover"
-                        sizes="64px"
-                      />
-                    </div>
-                  )}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        {/* Collectibles */}
+        <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
+          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
+            Top 10 — Collectibles
+          </summary>
+          <ul className="divide-y divide-neutral-800">
+            {topCollectibles.length ? topCollectibles.map((p) => <Row key={uniqKey(p)} p={p} />) : (
+              <li className="p-4 text-sm text-white/60">No collectibles available.</li>
+            )}
+          </ul>
+        </details>
 
         <p className="text-xs text-white/50">
-          Built from multiple brand searches (10 per brand). Shows rank&nbsp;#1
-          upward until a gap; if fewer than 10 contiguous ranks found, falls
-          back to best 10 by rank.
+          Built from multiple brand searches (10 per brand). Lists show ranks from #1 upward until a gap; if fewer than 10
+          contiguous ranks are found, they fall back to the best by rank.
         </p>
       </div>
     </section>
