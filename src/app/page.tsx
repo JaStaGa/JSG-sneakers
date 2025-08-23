@@ -4,15 +4,6 @@ import Image from "next/image";
 import { headers } from "next/headers";
 import type { Sneaker } from "@/lib/sneakerApi";
 
-function stripHtml(s: string) {
-  return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-function summarize(s?: string, max = 160) {
-  if (!s) return "";
-  const t = s.trim();
-  return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
-}
-
 async function absoluteUrl(path: string) {
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "http";
@@ -24,35 +15,101 @@ async function absoluteUrl(path: string) {
   return `${proto}://${host}${path}`;
 }
 
-async function getTop10(): Promise<Sneaker[]> {
-  // Grab a broad set, then sort by rank locally.
-  const params = new URLSearchParams({ q: "air", limit: "100" });
+// Brand seeds: more breadth, 10 per brand
+const BRAND_SEEDS: { q: string; matchers: RegExp[] }[] = [
+  { q: "Jordan", matchers: [/^jordan$/i, /^air jordan/i] },
+  { q: "Nike", matchers: [/^nike$/i] },
+  { q: "adidas", matchers: [/^adidas$/i] },
+  { q: "New Balance", matchers: [/^new balance$/i, /^nb$/i] },
+  { q: "ASICS", matchers: [/^asics$/i] },
+  { q: "POP MART", matchers: [/^pop ?mart$/i] },
+  { q: "Essentials", matchers: [/^essentials$/i, /fear of god/i] },
+  { q: "Fear of God Essentials", matchers: [/fear of god/i, /essentials/i] },
+];
+
+function brandMatches(seed: { matchers: RegExp[] }, brand?: string) {
+  const b = (brand ?? "").trim();
+  return b && seed.matchers.some((rx) => rx.test(b));
+}
+
+function uniqKey(p: Sneaker) {
+  return String(p.slug ?? p.sku ?? p.id ?? "").toLowerCase();
+}
+
+async function fetchBrandBatch(q: string, limit = 10): Promise<Sneaker[]> {
+  const params = new URLSearchParams({ q, limit: String(limit) });
   const url = await absoluteUrl(`/api/sneakers/search?${params.toString()}`);
   const res = await fetch(url, { next: { revalidate: 3600 } });
   if (!res.ok) return [];
   const json = await res.json();
-  const list: Sneaker[] = Array.isArray(json) ? json : json.data ?? [];
+  return (Array.isArray(json) ? json : json.data ?? []) as Sneaker[];
+}
 
-  // Sort by rank (ascending), de-dupe by slug/sku/id, take 10.
-  const sorted = [...list].sort(
-    (a, b) =>
-      (a.rank ?? Number.POSITIVE_INFINITY) -
-      (b.rank ?? Number.POSITIVE_INFINITY)
-  );
-  const seen = new Set<string>();
+function buildContiguousFromOne(items: Sneaker[]) {
+  const byRank = new Map<number, Sneaker>();
+  for (const p of items) {
+    const r = typeof p.rank === "number" ? p.rank : undefined;
+    if (!r || r <= 0) continue;
+    if (!byRank.has(r)) byRank.set(r, p);
+  }
   const out: Sneaker[] = [];
-  for (const p of sorted) {
-    const key = (p.slug ?? p.sku ?? p.id ?? "").toString().toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(p);
-    if (out.length >= 10) break;
+  for (let want = 1; want <= 1000; want++) {
+    const hit = byRank.get(want);
+    if (!hit) break;
+    out.push(hit);
   }
   return out;
 }
 
+async function getApproxTopContiguous(): Promise<Sneaker[]> {
+  const batches = await Promise.all(
+    BRAND_SEEDS.map((seed) => fetchBrandBatch(seed.q, 10))
+  );
+
+  const seen = new Set<string>();
+  const merged: Sneaker[] = [];
+  for (let i = 0; i < batches.length; i++) {
+    const seed = BRAND_SEEDS[i];
+    for (const p of batches[i]) {
+      if (!brandMatches(seed, p.brand)) continue;
+      if (typeof p.rank !== "number" || p.rank <= 0) continue;
+      const k = uniqKey(p);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      merged.push(p);
+    }
+  }
+
+  merged.sort(
+    (a, b) =>
+      (a.rank ?? Number.POSITIVE_INFINITY) -
+      (b.rank ?? Number.POSITIVE_INFINITY)
+  );
+
+  const contiguous = buildContiguousFromOne(merged);
+  if (contiguous.length >= 10) return contiguous;
+  return merged.slice(0, 10);
+}
+
+// --- blurb helpers: use full description when available, trim to length ---
+const MAX_BLURB = 160;
+function stripHtml(html: string) {
+  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+function ellipsize(s: string, n = MAX_BLURB) {
+  if (s.length <= n) return s;
+  const cut = s.slice(0, n);
+  const end = cut.lastIndexOf(" ");
+  return (end > 60 ? cut.slice(0, end) : cut).trim() + "…";
+}
+function blurbFor(p: Sneaker) {
+  const raw = p.description ?? p.short_description ?? "";
+  const plain = stripHtml(raw);
+  return ellipsize(plain, MAX_BLURB);
+}
+
 export default async function Page() {
-  const top10 = await getTop10();
+  const top = await getApproxTopContiguous();
 
   return (
     <section className="space-y-8">
@@ -76,25 +133,23 @@ export default async function Page() {
         </Link>
       </div>
 
-      {/* Top 10 ranked */}
+      {/* Top ranked across popular brands (approx) */}
       <div className="space-y-3">
-        <h2 className="text-lg font-medium text-yellow-400">Top 10 right now</h2>
+        <h2 className="text-lg font-medium text-yellow-400">
+          Top ranked across popular brands (approx)
+        </h2>
 
         <ul className="divide-y divide-neutral-800 rounded-2xl border border-neutral-800 bg-neutral-900">
-          {top10.length === 0 && (
+          {top.length === 0 && (
             <li className="p-4 text-sm text-white/60">No items available.</li>
           )}
 
-          {top10.map((p) => {
+          {top.map((p) => {
             const href = `/sneaker/${encodeURIComponent(
               p.slug ?? p.sku ?? p.id
             )}`;
             const title = p.title ?? p.name ?? "Untitled";
-            const rawBlurb =
-              (p.short_description && p.short_description.trim()) ||
-              (p.description ? stripHtml(p.description) : "");
-            const blurb = summarize(rawBlurb, 160);
-
+            const blurb = blurbFor(p);
             const priceBits: string[] = [];
             if (p.avg_price !== undefined)
               priceBits.push(`avg $${Math.round(p.avg_price)}`);
@@ -142,8 +197,9 @@ export default async function Page() {
         </ul>
 
         <p className="text-xs text-white/50">
-          “Top 10” is determined by the lowest popularity rank seen in a broad
-          search and may vary as market data updates.
+          Built from multiple brand searches (10 per brand). Shows rank&nbsp;#1
+          upward until a gap; if fewer than 10 contiguous ranks found, falls
+          back to best 10 by rank.
         </p>
       </div>
     </section>

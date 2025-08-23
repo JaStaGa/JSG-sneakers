@@ -15,8 +15,8 @@ export default function SearchPage() {
     const [gender, setGender] = useState<GenderFilter>('all');
     const [minP, setMinP] = useState('');
     const [maxP, setMaxP] = useState('');
+    const [rankMax, setRankMax] = useState('');              // ← NEW
     const [sortBy, setSortBy] = useState<SortKey>('rank');
-    const [showFilters, setShowFilters] = useState(false);
 
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState<string | null>(null);
@@ -44,6 +44,7 @@ export default function SearchPage() {
     const shown = useMemo(() => {
         const min = minP ? Number(minP) : undefined;
         const max = maxP ? Number(maxP) : undefined;
+        const rmax = rankMax ? Number(rankMax) : undefined;    // ← NEW
         const g = gender;
 
         const filtered = items.filter((p) => {
@@ -54,79 +55,44 @@ export default function SearchPage() {
             const price = (p.avg_price ?? p.min_price ?? p.max_price) as number | undefined;
             if (min !== undefined && price !== undefined && price < min) return false;
             if (max !== undefined && price !== undefined && price > max) return false;
+            if (rmax !== undefined && (p.rank ?? Infinity) > rmax) return false;   // ← NEW
             return true;
         });
 
         const sorted = [...filtered].sort((a, b) => {
             if (sortBy === 'rank') return (a.rank ?? Infinity) - (b.rank ?? Infinity);
-            if (sortBy === 'avg_price') return (b.avg_price ?? 0) - (a.avg_price ?? 0);       // High → Low
-            if (sortBy === 'avg_price_asc') return (a.avg_price ?? 0) - (b.avg_price ?? 0);   // Low → High
+            if (sortBy === 'avg_price') return (b.avg_price ?? 0) - (a.avg_price ?? 0);
+            if (sortBy === 'avg_price_asc') return (a.avg_price ?? 0) - (b.avg_price ?? 0);
             const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
             const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
             return tb - ta;
         });
 
         return sorted;
-    }, [items, gender, minP, maxP, sortBy]);
+    }, [items, gender, minP, maxP, rankMax, sortBy]);         // ← include rankMax
 
     return (
         <section className="space-y-6">
             <h1 className="font-brand text-2xl text-yellow-400">Search</h1>
 
-            <form
-                className="grid gap-3 sm:grid-cols-4"
-                onSubmit={(e) => { e.preventDefault(); run(); }}
-            >
-                <input
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white placeholder-white/40"
-                    placeholder="Name"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                />
-                <input
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white placeholder-white/40"
-                    placeholder="SKU e.g. CT8012-104"
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
-                />
-                <input
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white placeholder-white/40"
-                    placeholder="Brand (optional)"
-                    value={brand}
-                    onChange={(e) => setBrand(e.target.value)}
-                />
-                <button
-                    type="submit"
+            <form className="grid gap-3 sm:grid-cols-4" onSubmit={(e) => { e.preventDefault(); run(); }}>
+                <input className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white placeholder-white/40"
+                    placeholder="Name" value={q} onChange={(e) => setQ(e.target.value)} />
+                <input className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white placeholder-white/40"
+                    placeholder="SKU e.g. CT8012-104" value={sku} onChange={(e) => setSku(e.target.value)} />
+                <input className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white placeholder-white/40"
+                    placeholder="Brand (optional)" value={brand} onChange={(e) => setBrand(e.target.value)} />
+                <button type="submit"
                     className="rounded-xl p-3 bg-[var(--accent)] text-black hover:brightness-110 disabled:opacity-50"
-                    disabled={loading || (!q.trim() && !sku.trim() && !brand.trim())}
-                >
+                    disabled={loading || (!q.trim() && !sku.trim() && !brand.trim())}>
                     {loading ? 'Searching…' : 'Search'}
                 </button>
             </form>
 
-            {/* Mobile filters toggle */}
-            <button
-                type="button"
-                className="sm:hidden w-full rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white flex items-center justify-between"
-                onClick={() => setShowFilters((s) => !s)}
-                aria-expanded={showFilters}
-                aria-controls="filters-panel"
-            >
-                <span>Filters</span>
-                <span className="opacity-70">{showFilters ? '▲' : '▼'}</span>
-            </button>
-
-            {/* Filters panel: hidden on mobile until toggled; always visible ≥sm */}
-            <div
-                id="filters-panel"
-                className={`${showFilters ? 'grid' : 'hidden'} sm:grid gap-3 grid-cols-2 sm:grid-cols-5`}
-            >
-                <select
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
-                    value={gender}
-                    onChange={(e) => setGender(e.target.value as GenderFilter)}
-                    title="Gender"
-                >
+            {/* Filters */}
+            <div className="grid gap-3 sm:grid-cols-6">
+                <select className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
+                    value={gender} onChange={(e) => setGender(e.target.value as GenderFilter)} title="Gender">
                     <option value="all">All genders</option>
                     <option value="men">Men</option>
                     <option value="women">Women</option>
@@ -134,37 +100,29 @@ export default function SearchPage() {
                     <option value="unisex">Unisex</option>
                 </select>
 
-                <input
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
-                    type="number" min="0" step="1" placeholder="Min price"
-                    value={minP}
-                    onChange={(e) => setMinP(e.target.value)}
-                    title="Min avg price"
-                />
-                <input
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
-                    type="number" min="0" step="1" placeholder="Max price"
-                    value={maxP}
-                    onChange={(e) => setMaxP(e.target.value)}
-                    title="Max avg price"
-                />
-                <select
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as SortKey)}
-                    title="Sort"
-                >
+                <input className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
+                    type="number" min="0" step="1" placeholder="Min price" value={minP}
+                    onChange={(e) => setMinP(e.target.value)} title="Min avg price" />
+                <input className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
+                    type="number" min="0" step="1" placeholder="Max price" value={maxP}
+                    onChange={(e) => setMaxP(e.target.value)} title="Max avg price" />
+
+                {/* NEW: Max rank */}
+                <input className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
+                    type="number" min="1" step="1" placeholder="Max rank (e.g., 50)" value={rankMax}
+                    onChange={(e) => setRankMax(e.target.value)} title="Filter by rank ≤ N" />
+
+                <select className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
+                    value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)} title="Sort">
                     <option value="rank">Sort: Popular</option>
                     <option value="avg_price">Price: High → Low</option>
                     <option value="avg_price_asc">Price: Low → High</option>
                     <option value="updated_at">Sort: Updated ↓</option>
                 </select>
 
-                <button
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
+                <button className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
                     type="button"
-                    onClick={() => { setGender('all'); setMinP(''); setMaxP(''); setSortBy('rank'); }}
-                >
+                    onClick={() => { setGender('all'); setMinP(''); setMaxP(''); setRankMax(''); setSortBy('rank'); }}>
                     Reset filters
                 </button>
             </div>
@@ -175,20 +133,13 @@ export default function SearchPage() {
                 {shown.map((p) => {
                     const href = `/sneaker/${encodeURIComponent(p.slug ?? p.sku ?? p.id)}`;
                     return (
-                        <li
-                            key={p.id}
-                            className="rounded-2xl border border-neutral-800 bg-neutral-900 overflow-hidden hover:border-[var(--accent)]"
-                        >
+                        <li key={p.id}
+                            className="rounded-2xl border border-neutral-800 bg-neutral-900 overflow-hidden hover:border-[var(--accent)]">
                             <Link href={href} className="block">
                                 {p.image && (
                                     <div className="relative aspect-video">
-                                        <Image
-                                            src={p.image}
-                                            alt={p.title ?? p.name ?? 'Sneaker'}
-                                            fill
-                                            className="object-cover"
-                                            sizes="(min-width:1024px) 33vw, (min-width:640px) 50vw, 100vw"
-                                        />
+                                        <Image src={p.image} alt={p.title ?? p.name ?? 'Sneaker'} fill className="object-cover"
+                                            sizes="(min-width:1024px) 33vw, (min-width:640px) 50vw, 100vw" />
                                     </div>
                                 )}
                                 <div className="p-3 space-y-1">
