@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "images.stockx.com" },
+      { protocol: "https", hostname: "stockx-assets.imgix.net" }, // placeholder host
+    ],
+  },
 };
 
 export default nextConfig;
