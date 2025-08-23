@@ -13,9 +13,10 @@ export default function SearchPage() {
     const [sku, setSku] = useState('');
     const [brand, setBrand] = useState('');
     const [gender, setGender] = useState<GenderFilter>('all');
-    const [minP, setMinP] = useState(''); // numeric, keep as text for inputs
+    const [minP, setMinP] = useState('');
     const [maxP, setMaxP] = useState('');
     const [sortBy, setSortBy] = useState<SortKey>('rank');
+    const [showFilters, setShowFilters] = useState(false);
 
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState<string | null>(null);
@@ -46,12 +47,10 @@ export default function SearchPage() {
         const g = gender;
 
         const filtered = items.filter((p) => {
-            // gender
             if (g !== 'all') {
                 const pg = (p.gender ?? '').toLowerCase();
                 if (pg && pg !== g) return false;
             }
-            // price window on a representative price
             const price = (p.avg_price ?? p.min_price ?? p.max_price) as number | undefined;
             if (min !== undefined && price !== undefined && price < min) return false;
             if (max !== undefined && price !== undefined && price > max) return false;
@@ -60,9 +59,8 @@ export default function SearchPage() {
 
         const sorted = [...filtered].sort((a, b) => {
             if (sortBy === 'rank') return (a.rank ?? Infinity) - (b.rank ?? Infinity);
-            if (sortBy === 'avg_price') return (b.avg_price ?? 0) - (a.avg_price ?? 0);      // High → Low
-            if (sortBy === 'avg_price_asc') return (a.avg_price ?? 0) - (b.avg_price ?? 0);  // Low → High
-            // updated_at desc
+            if (sortBy === 'avg_price') return (b.avg_price ?? 0) - (a.avg_price ?? 0);       // High → Low
+            if (sortBy === 'avg_price_asc') return (a.avg_price ?? 0) - (b.avg_price ?? 0);   // Low → High
             const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
             const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
             return tb - ta;
@@ -106,8 +104,23 @@ export default function SearchPage() {
                 </button>
             </form>
 
-            {/* Filters */}
-            <div className="grid gap-3 sm:grid-cols-5">
+            {/* Mobile filters toggle */}
+            <button
+                type="button"
+                className="sm:hidden w-full rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white flex items-center justify-between"
+                onClick={() => setShowFilters((s) => !s)}
+                aria-expanded={showFilters}
+                aria-controls="filters-panel"
+            >
+                <span>Filters</span>
+                <span className="opacity-70">{showFilters ? '▲' : '▼'}</span>
+            </button>
+
+            {/* Filters panel: hidden on mobile until toggled; always visible ≥sm */}
+            <div
+                id="filters-panel"
+                className={`${showFilters ? 'grid' : 'hidden'} sm:grid gap-3 grid-cols-2 sm:grid-cols-5`}
+            >
                 <select
                     className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-white"
                     value={gender}
