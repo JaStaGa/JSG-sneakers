@@ -65,8 +65,7 @@ const uniqKey = (p: Sneaker) => String(p.slug ?? p.sku ?? p.id ?? "").toLowerCas
 async function fetchBrandBatch(q: string, limit = 10): Promise<Sneaker[]> {
   const params = new URLSearchParams({ q, limit: String(limit) });
   const url = await absoluteUrl(`/api/sneakers/search?${params.toString()}`);
-  // Keep a revalidate, but server+CDN cache now handles most savings
-  const res = await fetch(url, { next: { revalidate: 3600 } });
+  const res = await fetch(url, { cache: "no-store" }); // was: next:{ revalidate:3600 }
   if (!res.ok) return [];
   const json = await res.json();
   return (Array.isArray(json) ? json : json.data ?? []) as Sneaker[];
