@@ -65,6 +65,7 @@ const uniqKey = (p: Sneaker) => String(p.slug ?? p.sku ?? p.id ?? "").toLowerCas
 async function fetchBrandBatch(q: string, limit = 10): Promise<Sneaker[]> {
   const params = new URLSearchParams({ q, limit: String(limit) });
   const url = await absoluteUrl(`/api/sneakers/search?${params.toString()}`);
+  // Keep a revalidate, but server+CDN cache now handles most savings
   const res = await fetch(url, { next: { revalidate: 3600 } });
   if (!res.ok) return [];
   const json = await res.json();
@@ -73,7 +74,7 @@ async function fetchBrandBatch(q: string, limit = 10): Promise<Sneaker[]> {
 
 /** ---------- Merge once; sort by rank ---------- */
 async function getMergedRanked(): Promise<Sneaker[]> {
-  const batches = await Promise.all(BRAND_SEEDS.map((s) => fetchBrandBatch(s.q, 30)));
+  const batches = await Promise.all(BRAND_SEEDS.map((s) => fetchBrandBatch(s.q, 10)));
 
   const seen = new Set<string>();
   const merged: Sneaker[] = [];
