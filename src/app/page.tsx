@@ -1,177 +1,231 @@
 // /src/app/page.tsx
-import Link from "next/link";
+
 import Image from "next/image";
+import Link from "next/link";
 import { headers } from "next/headers";
-import type { Sneaker } from "@/lib/sneakerApi";
+import type {
+  Sneaker,
+  SneakerSearchResponse,
+} from "@/lib/sneakerApi";
 
 async function absoluteUrl(path: string) {
-  const h = await headers();
-  const proto = h.get("x-forwarded-proto") ?? "http";
+  const requestHeaders = await headers();
+
+  const protocol =
+    requestHeaders.get("x-forwarded-proto") ?? "http";
+
   const host =
-    h.get("x-forwarded-host") ??
-    h.get("host") ??
+    requestHeaders.get("x-forwarded-host") ??
+    requestHeaders.get("host") ??
     process.env.VERCEL_URL ??
     "localhost:3000";
-  return `${proto}://${host}${path}`;
+
+  return `${protocol}://${host}${path}`;
 }
 
-/** ---------- Brand seeds (breadth) ---------- */
-const BRAND_SEEDS: { q: string; matchers: RegExp[] }[] = [
-  { q: "Jordan", matchers: [/^jordan$/i, /^air jordan/i] },
-  { q: "Nike", matchers: [/^nike$/i] },
-  { q: "adidas", matchers: [/^adidas$/i] },
-  { q: "New Balance", matchers: [/^new balance$/i, /^nb$/i] },
-  { q: "ASICS", matchers: [/^asics$/i] },
-  { q: "Yeezy", matchers: [/^yeezy$/i] },
-  { q: "Puma", matchers: [/^puma$/i] },
-  { q: "Reebok", matchers: [/^reebok$/i] },
-  { q: "Converse", matchers: [/^converse$/i] },
-  { q: "Vans", matchers: [/^vans$/i] },
-  { q: "Salomon", matchers: [/^salomon$/i] },
-  { q: "Hoka", matchers: [/^hoka( one one)?$/i] },
-  { q: "On Running", matchers: [/^on( running)?$/i] },
-  { q: "UGG", matchers: [/^ugg$/i] },
-  { q: "Crocs", matchers: [/^crocs/i] },
-  { q: "Birkenstock", matchers: [/^birkenstock$/i] },
-  { q: "Timberland", matchers: [/^timberland$/i] },
-
-
-  // Streetwear / collectibles
-  { q: "Supreme", matchers: [/^supreme$/i] },
-  { q: "Essentials", matchers: [/^essentials$/i, /fear of god/i] },
-  { q: "Fear of God Essentials", matchers: [/fear of god/i, /essentials/i] },
-  { q: "Palace", matchers: [/^palace$/i] },
-  { q: "BAPE", matchers: [/^bape$/i, /a bathing ape/i] },
-  { q: "Kith", matchers: [/^kith$/i] },
-  { q: "Stussy", matchers: [/^st[üu]ssy$/i, /^stussy$/i] },
-
-  { q: "POP MART", matchers: [/^pop ?mart$/i] },
-  { q: "BEARBRICK", matchers: [/^be@?rbrick$/i, /^medicom( toy)?$/i] },
-  { q: "LEGO", matchers: [/^lego$/i] },
-  { q: "Funko", matchers: [/^funko$/i] },
-  { q: "KAWS", matchers: [/^kaws$/i] },
-  { q: "Hot Wheels", matchers: [/^hot wheels$/i] },
-  { q: "Pokémon", matchers: [/^pok[eé]mon/i] },
-  { q: "Panini", matchers: [/^panini$/i] },
-  { q: "Topps", matchers: [/^topps$/i] },
-];
-
-function brandMatches(seed: { matchers: RegExp[] }, brand?: string) {
-  const b = (brand ?? "").trim();
-  return b && seed.matchers.some((rx) => rx.test(b));
-}
-const uniqKey = (p: Sneaker) => String(p.slug ?? p.sku ?? p.id ?? "").toLowerCase();
-
-async function fetchBrandBatch(q: string, limit = 10): Promise<Sneaker[]> {
-  const params = new URLSearchParams({ q, limit: String(limit) });
-  const url = await absoluteUrl(`/api/sneakers/search?${params.toString()}`);
-  const res = await fetch(url, { cache: "no-store" }); // was: next:{ revalidate:3600 }
-  if (!res.ok) return [];
-  const json = await res.json();
-  return (Array.isArray(json) ? json : json.data ?? []) as Sneaker[];
+function uniqueProductKey(product: Sneaker) {
+  return String(
+    product.slug ??
+      product.sku ??
+      product.id ??
+      "",
+  ).toLowerCase();
 }
 
-/** ---------- Merge once; sort by rank ---------- */
-async function getMergedRanked(): Promise<Sneaker[]> {
-  const batches = await Promise.all(BRAND_SEEDS.map((s) => fetchBrandBatch(s.q, 10)));
-
+function cleanRankedProducts(products: Sneaker[]) {
   const seen = new Set<string>();
-  const merged: Sneaker[] = [];
-  for (let i = 0; i < batches.length; i++) {
-    const seed = BRAND_SEEDS[i];
-    for (const p of batches[i]) {
-      if (!brandMatches(seed, p.brand)) continue;
-      if (typeof p.rank !== "number" || p.rank <= 0) continue;
-      const k = uniqKey(p);
-      if (!k || seen.has(k)) continue;
-      seen.add(k);
-      merged.push(p);
-    }
-  }
 
-  merged.sort(
-    (a, b) =>
-      (a.rank ?? Number.POSITIVE_INFINITY) -
-      (b.rank ?? Number.POSITIVE_INFINITY)
+  return products
+    .filter(
+      (product) =>
+        typeof product.rank === "number" &&
+        product.rank > 0,
+    )
+    .sort(
+      (first, second) =>
+        (first.rank ?? Number.POSITIVE_INFINITY) -
+        (second.rank ?? Number.POSITIVE_INFINITY),
+    )
+    .filter((product) => {
+      const key = uniqueProductKey(product);
+
+      if (!key || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 10);
+}
+
+async function fetchRankedProducts(
+  filters: string,
+): Promise<Sneaker[]> {
+  const params = new URLSearchParams({
+    filters,
+    sort: "rank",
+    limit: "20",
+  });
+
+  const url = await absoluteUrl(
+    `/api/sneakers/search?${params.toString()}`,
   );
-  return merged;
-}
 
-/** ---------- Kind detection (loose heuristics) ---------- */
-function kindOf(p: Sneaker): "sneakers" | "streetwear" | "collectibles" | "other" {
-  const hay = `${p.product_type ?? ""} ${p.category ?? ""} ${p.secondary_category ?? ""} ${p.brand ?? ""}`.toLowerCase();
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+    });
 
-  if (/(sneaker|shoe|footwear)/.test(hay)) return "sneakers";
-  if (/(streetwear|hoodie|t-?shirt|tee|sweatshirt|jacket|pants|shorts)/.test(hay) || /essentials/.test(hay))
-    return "streetwear";
-  if (/(collectible|figure|vinyl|toy|bearbrick|be@?rbrick|trading|card)/.test(hay) || /pop ?mart/.test(hay))
-    return "collectibles";
-  return "other";
-}
+    if (!response.ok) {
+      const errorBody = await response.text();
 
-/** ---------- “Contiguous from #1” helper ---------- */
-function contiguousFromOne(items: Sneaker[]) {
-  const byRank = new Map<number, Sneaker>();
-  for (const p of items) {
-    const r = typeof p.rank === "number" ? p.rank : undefined;
-    if (!r || r <= 0) continue;
-    if (!byRank.has(r)) byRank.set(r, p);
+      console.error(
+        `Ranked product request failed with ${response.status}:`,
+        errorBody,
+      );
+
+      return [];
+    }
+
+    const json = (await response.json()) as
+      | SneakerSearchResponse
+      | Sneaker[];
+
+    const products = Array.isArray(json)
+      ? json
+      : json.data ?? [];
+
+    return cleanRankedProducts(products);
+  } catch (error: unknown) {
+    console.error(
+      "Unable to load ranked products:",
+      error instanceof Error
+        ? error.message
+        : String(error),
+    );
+
+    return [];
   }
-  const out: Sneaker[] = [];
-  for (let want = 1; want <= 1000; want++) {
-    const hit = byRank.get(want);
-    if (!hit) break;
-    out.push(hit);
+}
+
+const MAX_BLURB_LENGTH = 160;
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function ellipsize(
+  value: string,
+  maximumLength = MAX_BLURB_LENGTH,
+) {
+  if (value.length <= maximumLength) {
+    return value;
   }
-  return out;
+
+  const shortened = value.slice(0, maximumLength);
+  const finalSpace = shortened.lastIndexOf(" ");
+
+  const ending =
+    finalSpace > 60
+      ? shortened.slice(0, finalSpace)
+      : shortened;
+
+  return `${ending.trim()}…`;
 }
 
-/** Build a Top 10 list from a merged set, optionally filtering by kind */
-function top10FromMerged(merged: Sneaker[], filter?: (p: Sneaker) => boolean) {
-  const pool = filter ? merged.filter(filter) : merged;
-  const contig = contiguousFromOne(pool);
-  const base = (contig.length >= 10 ? contig : pool).slice(0, 10);
-  return base;
+function blurbFor(product: Sneaker) {
+  const description =
+    product.description ??
+    product.short_description ??
+    "";
+
+  return ellipsize(stripHtml(description));
 }
 
-/** ---------- Blurb helpers (use full description, trimmed) ---------- */
-const MAX_BLURB = 160;
-const stripHtml = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-function ellipsize(s: string, n = MAX_BLURB) {
-  if (s.length <= n) return s;
-  const cut = s.slice(0, n);
-  const end = cut.lastIndexOf(" ");
-  return (end > 60 ? cut.slice(0, end) : cut).trim() + "…";
-}
-const blurbFor = (p: Sneaker) => ellipsize(stripHtml(p.description ?? p.short_description ?? ""));
+function RankingRow({
+  product,
+}: {
+  product: Sneaker;
+}) {
+  const identifier =
+    product.slug ??
+    product.sku ??
+    product.id;
 
-/** ---------- List row ---------- */
-function Row({ p }: { p: Sneaker }) {
-  const href = `/sneaker/${encodeURIComponent(p.slug ?? p.sku ?? p.id)}`;
-  const title = p.title ?? p.name ?? "Untitled";
-  const priceBits: string[] = [];
-  if (p.avg_price !== undefined) priceBits.push(`avg $${Math.round(p.avg_price)}`);
-  if (p.max_price !== undefined) priceBits.push(`max $${Math.round(p.max_price)}`);
-  const meta = [p.gender, ...priceBits].filter(Boolean).join(" · ");
+  const href = `/sneaker/${encodeURIComponent(
+    identifier,
+  )}`;
+
+  const title =
+    product.title ??
+    product.name ??
+    "Untitled product";
+
+  const priceDetails: string[] = [];
+
+  if (product.avg_price !== undefined) {
+    priceDetails.push(
+      `avg $${Math.round(product.avg_price)}`,
+    );
+  }
+
+  if (product.max_price !== undefined) {
+    priceDetails.push(
+      `max $${Math.round(product.max_price)}`,
+    );
+  }
+
+  const metadata = [
+    product.brand,
+    product.gender,
+    ...priceDetails,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const description = blurbFor(product);
 
   return (
-    <li key={p.id ?? href}>
-      <Link href={href} className="flex items-center gap-3 p-3 hover:bg-neutral-800/60">
+    <li>
+      <Link
+        href={href}
+        className="flex items-center gap-4 p-4 transition-colors hover:bg-neutral-800/60"
+      >
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-xs text-white/50">#{p.rank ?? "—"}</span>
-            <h3 className="truncate">{title}</h3>
+            <span className="shrink-0 text-xs font-medium text-white/50">
+              #{product.rank ?? "—"}
+            </span>
+
+            <h3 className="truncate font-medium">
+              {title}
+            </h3>
           </div>
-          {(p.description || p.short_description || meta) && (
-            <p className="text-sm text-white/60">
-              {blurbFor(p)}
-              {meta ? ` · ${meta}` : ""}
+
+          {(description || metadata) && (
+            <p className="mt-1 text-sm text-white/60">
+              {description}
+
+              {description && metadata ? " · " : ""}
+
+              {metadata}
             </p>
           )}
         </div>
-        {p.image && (
-          <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-neutral-800">
-            <Image src={p.image} alt={title} fill className="object-cover" sizes="64px" />
+
+        {product.image && (
+          <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-neutral-700 bg-white">
+            <Image
+              src={product.image}
+              alt={title}
+              fill
+              className="object-contain p-1"
+              sizes="64px"
+            />
           </div>
         )}
       </Link>
@@ -179,123 +233,132 @@ function Row({ p }: { p: Sneaker }) {
   );
 }
 
-/** ---------- Page ---------- */
+function RankingList({
+  title,
+  products,
+  emptyMessage,
+}: {
+  title: string;
+  products: Sneaker[];
+  emptyMessage: string;
+}) {
+  return (
+    <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
+      <summary className="cursor-pointer select-none p-4 text-lg font-medium text-yellow-400">
+        {title}
+      </summary>
+
+      <ul className="divide-y divide-neutral-800">
+        {products.length > 0 ? (
+          products.map((product) => (
+            <RankingRow
+              key={uniqueProductKey(product)}
+              product={product}
+            />
+          ))
+        ) : (
+          <li className="p-4 text-sm text-white/60">
+            {emptyMessage}
+          </li>
+        )}
+      </ul>
+    </details>
+  );
+}
+
 export default async function Page() {
-  const merged = await getMergedRanked();
-  const topAll = top10FromMerged(merged);
-  const topSneakers = top10FromMerged(merged, (p) => kindOf(p) === "sneakers");
-  const topStreetwear = top10FromMerged(merged, (p) => kindOf(p) === "streetwear");
-  const topCollectibles = top10FromMerged(merged, (p) => kindOf(p) === "collectibles");
+  const [
+    topAll,
+    topSneakers,
+    topStreetwear,
+    topCollectibles,
+  ] = await Promise.all([
+    fetchRankedProducts("rank > 0"),
+    fetchRankedProducts(
+      "product_type = 'sneakers' AND rank > 0",
+    ),
+    fetchRankedProducts(
+      "product_type = 'streetwear' AND rank > 0",
+    ),
+    fetchRankedProducts(
+      "product_type = 'collectibles' AND rank > 0",
+    ),
+  ]);
 
   return (
     <section className="space-y-8">
-      <h1 className="font-brand text-3xl text-yellow-400">JSG Drip</h1>
+      <h1 className="font-brand text-3xl text-yellow-400">
+        JSG Drip
+      </h1>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Link
           href="/search"
-          className="block rounded-2xl border border-neutral-800 bg-neutral-900 p-6 hover:border-yellow-400"
+          className="block rounded-2xl border border-neutral-800 bg-neutral-900 p-6 transition-colors hover:border-yellow-400"
         >
-          <h2 className="text-lg font-medium">Search sneakers →</h2>
-          <p className="text-sm text-white/70">Find by name or SKU.</p>
+          <h2 className="text-lg font-medium">
+            Search products →
+          </h2>
+
+          <p className="text-sm text-white/70">
+            Search sneakers, streetwear, and collectibles by
+            name or SKU.
+          </p>
         </Link>
 
         <Link
           href="/convert"
-          className="block rounded-2xl border border-neutral-800 bg-neutral-900 p-6 hover:border-yellow-400"
+          className="block rounded-2xl border border-neutral-800 bg-neutral-900 p-6 transition-colors hover:border-yellow-400"
         >
-          <h2 className="text-lg font-medium">Size converter →</h2>
-          <p className="text-sm text-white/70">US ↔ EU, Men/Women/GS.</p>
+          <h2 className="text-lg font-medium">
+            Size converter →
+          </h2>
+
+          <p className="text-sm text-white/70">
+            Convert between US and EU shoe sizes.
+          </p>
         </Link>
       </div>
 
-      {/* What is "ranking"? */}
       <p className="text-sm text-white/60">
-        <span className="font-medium text-white/70">Ranking</span> is a marketplace popularity score (lower is more popular),
-        derived from recent demand signals such as sales velocity, active bids/asks, and views.
-        It updates frequently and the lists below are an approximation built from multiple brand searches.
+        <span className="font-medium text-white/80">
+          Marketplace rank
+        </span>{" "}
+        is the popularity rank supplied by KicksDB&apos;s
+        StockX product data. Lower numbers represent more
+        popular products.
       </p>
 
-      {/* Top 10 dropdowns */}
       <div className="space-y-4">
-        {/* All items */}
-        <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
-          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
-            Top 10 — All items
-          </summary>
-          <ul className="divide-y divide-neutral-800">
-            {topAll.length ? topAll.map((p) => <Row key={uniqKey(p)} p={p} />) : (
-              <li className="p-4 text-sm text-white/60">No items available.</li>
-            )}
-          </ul>
-        </details>
+        <RankingList
+          title="Top 10 — All products"
+          products={topAll}
+          emptyMessage="No ranked products are currently available."
+        />
 
-        {/* Sneakers only */}
-        <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
-          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
-            Top 10 — Sneakers
-          </summary>
-          <ul className="divide-y divide-neutral-800">
-            {topSneakers.length ? topSneakers.map((p) => <Row key={uniqKey(p)} p={p} />) : (
-              <li className="p-4 text-sm text-white/60">No sneakers available.</li>
-            )}
-          </ul>
-        </details>
+        <RankingList
+          title="Top 10 — Sneakers"
+          products={topSneakers}
+          emptyMessage="No ranked sneakers are currently available."
+        />
 
-        {/* Streetwear */}
-        <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
-          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
-            Top 10 — Streetwear
-          </summary>
-          <ul className="divide-y divide-neutral-800">
-            {topStreetwear.length ? topStreetwear.map((p) => <Row key={uniqKey(p)} p={p} />) : (
-              <li className="p-4 text-sm text-white/60">No streetwear available.</li>
-            )}
-          </ul>
-        </details>
+        <RankingList
+          title="Top 10 — Streetwear"
+          products={topStreetwear}
+          emptyMessage="No ranked streetwear products are currently available."
+        />
 
-        {/* Collectibles */}
-        <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
-          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
-            Top 10 — Collectibles
-          </summary>
-          <ul className="divide-y divide-neutral-800">
-            {topCollectibles.length ? topCollectibles.map((p) => <Row key={uniqKey(p)} p={p} />) : (
-              <li className="p-4 text-sm text-white/60">No collectibles available.</li>
-            )}
-          </ul>
-        </details>
+        <RankingList
+          title="Top 10 — Collectibles"
+          products={topCollectibles}
+          emptyMessage="No ranked collectibles are currently available."
+        />
 
         <p className="text-xs text-white/50">
-          Built from multiple brand searches (10 per brand). Lists show ranks from #1 upward until a gap; if fewer than 10
-          contiguous ranks are found, they fall back to the best by rank.
+          Each list is loaded directly from KicksDB using its
+          marketplace rank and product-type filters. Rankings
+          may change as KicksDB refreshes its StockX data.
         </p>
-
-        {/* Temporary: full contiguous list from #1 (to find the next missing rank) */}
-        {/* <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
-          <summary className="cursor-pointer select-none p-3 text-lg font-medium text-yellow-400">
-            Contiguous ranks from #1 — Temporary (debug)
-          </summary>
-          <div className="px-3 pb-3 text-sm text-white/60">
-            {contigAll.length ? (
-              <>
-                Found <span className="text-white/80 font-medium">{contigAll.length}</span> contiguous ranks
-                {lastRank ? <> (#{1}–#{lastRank})</> : null}.{" "}
-                {lastRank ? <>Next missing appears to be <span className="text-white/80 font-medium">#{lastRank + 1}</span>.</> : null}
-                <br />
-                Tip: search more brands on localhost and add any that surface the missing rank to <code>BRAND_SEEDS</code>.
-              </>
-            ) : (
-              <>No contiguous ranks found yet.</>
-            )}
-          </div>
-          <ul className="divide-y divide-neutral-800">
-            {contigAll.length
-              ? contigAll.map((p) => <Row key={uniqKey(p)} p={p} />)
-              : <li className="p-4 text-sm text-white/60">Nothing to show.</li>}
-          </ul>
-        </details> */}
-
       </div>
     </section>
   );
