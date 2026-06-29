@@ -186,8 +186,6 @@ export default async function Page() {
   const topSneakers = top10FromMerged(merged, (p) => kindOf(p) === "sneakers");
   const topStreetwear = top10FromMerged(merged, (p) => kindOf(p) === "streetwear");
   const topCollectibles = top10FromMerged(merged, (p) => kindOf(p) === "collectibles");
-  const contigAll = contiguousFromOne(merged);               // #1 → until the first gap
-  const lastRank = contigAll.at(-1)?.rank as number | undefined;
 
   return (
     <section className="space-y-8">

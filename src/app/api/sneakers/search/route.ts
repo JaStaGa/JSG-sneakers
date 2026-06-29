@@ -22,10 +22,6 @@ function buildQuery(params: URLSearchParams) {
     return { params: out };
 }
 
-function cacheKey(url: string) {
-    return new URL(url).searchParams.toString(); // key by normalized QS
-}
-
 export async function GET(req: Request) {
     const key = process.env.KICKSDB_KEY;
     if (!key) {
