@@ -26,9 +26,9 @@ async function absoluteUrl(path: string) {
 function uniqueProductKey(product: Sneaker) {
   return String(
     product.slug ??
-      product.sku ??
-      product.id ??
-      "",
+    product.sku ??
+    product.id ??
+    "",
   ).toLowerCase();
 }
 
@@ -59,6 +59,15 @@ function cleanRankedProducts(products: Sneaker[]) {
     .slice(0, 10);
 }
 
+const RANKED_REQUEST_ATTEMPTS = 2;
+const RANKED_RETRY_DELAY_MS = 500;
+
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 async function fetchRankedProducts(
   filters: string,
 ): Promise<Sneaker[]> {
@@ -72,41 +81,51 @@ async function fetchRankedProducts(
     `/api/sneakers/search?${params.toString()}`,
   );
 
-  try {
-    const response = await fetch(url, {
-      cache: "no-store",
-    });
+  for (
+    let attempt = 1;
+    attempt <= RANKED_REQUEST_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+      });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
+      if (response.ok) {
+        const json = (await response.json()) as
+          | SneakerSearchResponse
+          | Sneaker[];
 
-      console.error(
-        `Ranked product request failed with ${response.status}:`,
-        errorBody,
-      );
+        const products = Array.isArray(json)
+          ? json
+          : json.data ?? [];
 
-      return [];
+        return cleanRankedProducts(products);
+      }
+
+      const canRetry =
+        response.status === 429 ||
+        response.status >= 500;
+
+      const isFinalAttempt =
+        attempt === RANKED_REQUEST_ATTEMPTS;
+
+      if (!canRetry || isFinalAttempt) {
+        return [];
+      }
+    } catch {
+      const isFinalAttempt =
+        attempt === RANKED_REQUEST_ATTEMPTS;
+
+      if (isFinalAttempt) {
+        return [];
+      }
     }
 
-    const json = (await response.json()) as
-      | SneakerSearchResponse
-      | Sneaker[];
-
-    const products = Array.isArray(json)
-      ? json
-      : json.data ?? [];
-
-    return cleanRankedProducts(products);
-  } catch (error: unknown) {
-    console.error(
-      "Unable to load ranked products:",
-      error instanceof Error
-        ? error.message
-        : String(error),
-    );
-
-    return [];
+    await wait(RANKED_RETRY_DELAY_MS * attempt);
   }
+
+  return [];
 }
 
 const MAX_BLURB_LENGTH = 160;
@@ -267,23 +286,21 @@ function RankingList({
 }
 
 export default async function Page() {
-  const [
-    topAll,
-    topSneakers,
-    topStreetwear,
-    topCollectibles,
-  ] = await Promise.all([
-    fetchRankedProducts("rank > 0"),
-    fetchRankedProducts(
-      "product_type = 'sneakers' AND rank > 0",
-    ),
-    fetchRankedProducts(
-      "product_type = 'streetwear' AND rank > 0",
-    ),
-    fetchRankedProducts(
-      "product_type = 'collectibles' AND rank > 0",
-    ),
-  ]);
+  const topAll = await fetchRankedProducts(
+    "rank >= 1 AND rank <= 10",
+  );
+
+  const topSneakers = await fetchRankedProducts(
+    "categories IN ['sneakers'] AND rank > 0",
+  );
+
+  const topStreetwear = await fetchRankedProducts(
+    "categories IN ['streetwear'] AND rank > 0",
+  );
+
+  const topCollectibles = await fetchRankedProducts(
+    "categories IN ['collectibles'] AND rank > 0",
+  );
 
   return (
     <section className="space-y-8">
