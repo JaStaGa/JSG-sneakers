@@ -1,8 +1,8 @@
 // /src/app/page.tsx
 
-import Image from "next/image";
 import Link from "next/link";
 import { headers } from "next/headers";
+import MarketplaceRankings from "@/components/MarketplaceRankings";
 import type {
   Sneaker,
   SneakerSearchResponse,
@@ -128,163 +128,6 @@ async function fetchRankedProducts(
   return [];
 }
 
-const MAX_BLURB_LENGTH = 160;
-
-function stripHtml(value: string) {
-  return value
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function ellipsize(
-  value: string,
-  maximumLength = MAX_BLURB_LENGTH,
-) {
-  if (value.length <= maximumLength) {
-    return value;
-  }
-
-  const shortened = value.slice(0, maximumLength);
-  const finalSpace = shortened.lastIndexOf(" ");
-
-  const ending =
-    finalSpace > 60
-      ? shortened.slice(0, finalSpace)
-      : shortened;
-
-  return `${ending.trim()}…`;
-}
-
-function blurbFor(product: Sneaker) {
-  const description =
-    product.description ??
-    product.short_description ??
-    "";
-
-  return ellipsize(stripHtml(description));
-}
-
-function RankingRow({
-  product,
-}: {
-  product: Sneaker;
-}) {
-  const identifier =
-    product.slug ??
-    product.sku ??
-    product.id;
-
-  const href = `/sneaker/${encodeURIComponent(
-    identifier,
-  )}`;
-
-  const title =
-    product.title ??
-    product.name ??
-    "Untitled product";
-
-  const priceDetails: string[] = [];
-
-  if (product.avg_price !== undefined) {
-    priceDetails.push(
-      `avg $${Math.round(product.avg_price)}`,
-    );
-  }
-
-  if (product.max_price !== undefined) {
-    priceDetails.push(
-      `max $${Math.round(product.max_price)}`,
-    );
-  }
-
-  const metadata = [
-    product.brand,
-    product.gender,
-    ...priceDetails,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  const description = blurbFor(product);
-
-  return (
-    <li>
-      <Link
-        href={href}
-        className="flex items-center gap-4 p-4 transition-colors hover:bg-neutral-800/60"
-      >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="shrink-0 text-xs font-medium text-white/50">
-              #{product.rank ?? "—"}
-            </span>
-
-            <h3 className="truncate font-medium">
-              {title}
-            </h3>
-          </div>
-
-          {(description || metadata) && (
-            <p className="mt-1 text-sm text-white/60">
-              {description}
-
-              {description && metadata ? " · " : ""}
-
-              {metadata}
-            </p>
-          )}
-        </div>
-
-        {product.image && (
-          <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-neutral-700 bg-white">
-            <Image
-              src={product.image}
-              alt={title}
-              fill
-              className="object-contain p-1"
-              sizes="64px"
-            />
-          </div>
-        )}
-      </Link>
-    </li>
-  );
-}
-
-function RankingList({
-  title,
-  products,
-  emptyMessage,
-}: {
-  title: string;
-  products: Sneaker[];
-  emptyMessage: string;
-}) {
-  return (
-    <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
-      <summary className="cursor-pointer select-none p-4 text-lg font-medium text-yellow-400">
-        {title}
-      </summary>
-
-      <ul className="divide-y divide-neutral-800">
-        {products.length > 0 ? (
-          products.map((product) => (
-            <RankingRow
-              key={uniqueProductKey(product)}
-              product={product}
-            />
-          ))
-        ) : (
-          <li className="p-4 text-sm text-white/60">
-            {emptyMessage}
-          </li>
-        )}
-      </ul>
-    </details>
-  );
-}
-
 export default async function Page() {
   const topAll = await fetchRankedProducts(
     "rank >= 1 AND rank <= 10",
@@ -303,80 +146,137 @@ export default async function Page() {
   );
 
   return (
-    <section className="space-y-8">
-      <h1 className="font-brand text-3xl text-yellow-400">
-        JSG Drip
-      </h1>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Link
-          href="/search"
-          className="block rounded-2xl border border-neutral-800 bg-neutral-900 p-6 transition-colors hover:border-yellow-400"
-        >
-          <h2 className="text-lg font-medium">
-            Search products →
-          </h2>
-
-          <p className="text-sm text-white/70">
-            Search sneakers, streetwear, and collectibles by
-            name or SKU.
+    <div className="space-y-16 sm:space-y-20">
+      <section className="grid gap-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)] lg:items-end">
+        <div>
+          <p className="eyebrow">
+            Marketplace discovery
           </p>
-        </Link>
 
-        <Link
-          href="/convert"
-          className="block rounded-2xl border border-neutral-800 bg-neutral-900 p-6 transition-colors hover:border-yellow-400"
-        >
-          <h2 className="text-lg font-medium">
-            Size converter →
-          </h2>
+          <h1 className="page-heading mt-4 max-w-4xl">
+            Find what&apos;s moving in sneakers,
+            streetwear, and collectibles.
+          </h1>
 
-          <p className="text-sm text-white/70">
-            Convert between US and EU shoe sizes.
+          <p className="mt-6 max-w-2xl text-base leading-7 text-white/60 sm:text-lg sm:leading-8">
+            Search marketplace products, browse current
+            popularity rankings, and compare shoe sizes
+            through one focused platform.
           </p>
-        </Link>
-      </div>
 
-      <p className="text-sm text-white/60">
-        <span className="font-medium text-white/80">
-          Marketplace rank
-        </span>{" "}
-        is the popularity rank supplied by KicksDB&apos;s
-        StockX product data. Lower numbers represent more
-        popular products.
-      </p>
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <Link
+              href="/search"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-yellow-400 px-6 text-sm font-bold text-black transition hover:bg-yellow-300"
+            >
+              Search marketplace
+            </Link>
 
-      <div className="space-y-4">
-        <RankingList
-          title="Top 10 — All products"
-          products={topAll}
-          emptyMessage="No ranked products are currently available."
+            <Link
+              href="/convert"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/15 bg-white/[0.035] px-6 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/[0.07]"
+            >
+              Open size guide
+            </Link>
+          </div>
+        </div>
+
+        <aside className="surface-card p-6 sm:p-7">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-yellow-400">
+            Explore JSG Drip
+          </p>
+
+          <div className="mt-5 divide-y divide-white/10">
+            <div className="flex gap-4 pb-5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-yellow-400 text-sm font-bold text-black">
+                01
+              </span>
+
+              <div>
+                <h2 className="font-semibold">
+                  Search products
+                </h2>
+
+                <p className="mt-1 text-sm leading-6 text-white/50">
+                  Find products by name, brand, or SKU.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 py-5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.07] text-sm font-bold text-yellow-400">
+                02
+              </span>
+
+              <div>
+                <h2 className="font-semibold">
+                  Browse rankings
+                </h2>
+
+                <p className="mt-1 text-sm leading-6 text-white/50">
+                  Compare popular marketplace products
+                  across four categories.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 pt-5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.07] text-sm font-bold text-yellow-400">
+                03
+              </span>
+
+              <div>
+                <h2 className="font-semibold">
+                  Convert sizes
+                </h2>
+
+                <p className="mt-1 text-sm leading-6 text-white/50">
+                  Compare approximate US and EU shoe sizes.
+                </p>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section>
+        <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="eyebrow">
+              Marketplace rankings
+            </p>
+
+            <h2 className="section-heading mt-3">
+              See what shoppers are watching.
+            </h2>
+
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/55 sm:text-base">
+              Rankings use the marketplace popularity
+              position supplied through KicksDB&apos;s
+              StockX product data. Lower rank numbers
+              represent more popular products.
+            </p>
+          </div>
+
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-4 py-2 text-xs font-medium text-white/55">
+            <span className="h-2 w-2 rounded-full bg-yellow-400" />
+            Marketplace data via KicksDB
+          </div>
+        </div>
+
+        <MarketplaceRankings
+          all={topAll}
+          sneakers={topSneakers}
+          streetwear={topStreetwear}
+          collectibles={topCollectibles}
         />
 
-        <RankingList
-          title="Top 10 — Sneakers"
-          products={topSneakers}
-          emptyMessage="No ranked sneakers are currently available."
-        />
-
-        <RankingList
-          title="Top 10 — Streetwear"
-          products={topStreetwear}
-          emptyMessage="No ranked streetwear products are currently available."
-        />
-
-        <RankingList
-          title="Top 10 — Collectibles"
-          products={topCollectibles}
-          emptyMessage="No ranked collectibles are currently available."
-        />
-
-        <p className="text-xs text-white/50">
-          Each list is loaded directly from KicksDB using its
-          marketplace rank and product-type filters. Rankings
-          may change as KicksDB refreshes its StockX data.
+        <p className="mt-6 text-xs leading-5 text-white/40">
+          Rankings, prices, and product availability may
+          change as the upstream marketplace data is
+          refreshed.
         </p>
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }
